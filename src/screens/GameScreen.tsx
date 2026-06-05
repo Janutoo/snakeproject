@@ -3,9 +3,9 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableWithoutFeedback,
+  Pressable,
   GestureResponderEvent,
-  Alert,
+  Platform,
 } from 'react-native';
 import { Direction, GameSettings, Position } from '../utils/types';
 import { saveScore, getBestScore } from '../utils/storage';
@@ -111,6 +111,22 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     };
   }, [gameOver]);
 
+  // keyboard controls for web
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    function onKey(e: KeyboardEvent) {
+      if (gameOverRef.current) return;
+      const cur = nextDirectionRef.current;
+      if ((e.key === 'ArrowUp' || e.key === 'w') && cur !== 'DOWN') nextDirectionRef.current = 'UP';
+      else if ((e.key === 'ArrowDown' || e.key === 's') && cur !== 'UP') nextDirectionRef.current = 'DOWN';
+      else if ((e.key === 'ArrowLeft' || e.key === 'a') && cur !== 'RIGHT') nextDirectionRef.current = 'LEFT';
+      else if ((e.key === 'ArrowRight' || e.key === 'd') && cur !== 'LEFT') nextDirectionRef.current = 'RIGHT';
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const tick = useCallback(() => {
     if (gameOverRef.current) return;
 
@@ -126,14 +142,13 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     else if (dir === 'LEFT') nx -= 1;
     else if (dir === 'RIGHT') nx += 1;
 
-    // wrap-around (Nokia style)
-    nx = (nx + boardSize) % boardSize;
-    ny = (ny + boardSize) % boardSize;
-
     const newHead: Position = { x: nx, y: ny };
 
-    // collision with self
-    if (prev.some((p) => p.x === newHead.x && p.y === newHead.y)) {
+    // collision with wall or self
+    if (
+      nx < 0 || nx >= boardSize || ny < 0 || ny >= boardSize ||
+      prev.some((p) => p.x === newHead.x && p.y === newHead.y)
+    ) {
       gameOverRef.current = true;
       setGameOver(true);
       clearTimers();
@@ -166,10 +181,11 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     setSnake([...newSnake]);
   }, [boardSize, playerName, fruitDelay, onGameOver]);
 
-  function handlePress(event: GestureResponderEvent, boardLayout: { width: number; height: number; x: number; y: number }) {
+  function handlePress(event: GestureResponderEvent) {
+    if (gameOverRef.current) return;
     const { locationX, locationY } = event.nativeEvent;
-    const cx = boardLayout.width / 2;
-    const cy = boardLayout.height / 2;
+    const cx = boardRef.current.width / 2;
+    const cy = boardRef.current.height / 2;
     const dx = locationX - cx;
     const dy = locationY - cy;
     const cur = directionRef.current;
@@ -223,11 +239,7 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
       </View>
 
       {/* Board */}
-      <TouchableWithoutFeedback
-        onPress={(e) => {
-          if (!gameOver) handlePress(e, boardRef.current);
-        }}
-      >
+      <Pressable onPress={handlePress}>
         <View
           style={[styles.board, { width: GAME_SIZE, height: GAME_SIZE }]}
           onLayout={(e) => {
@@ -301,10 +313,14 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
             </View>
           )}
         </View>
-      </TouchableWithoutFeedback>
+      </Pressable>
 
       {/* Controls hint */}
-      <Text style={styles.hint}>Tapnij w kierunku, w którym wąż ma się ruszyć</Text>
+      <Text style={styles.hint}>
+        {Platform.OS === 'web'
+          ? 'Strzałki / WASD lub kliknij planszę w kierunku ruchu'
+          : 'Tapnij w kierunku, w którym wąż ma się ruszyć'}
+      </Text>
 
       <Text style={styles.menuLink} onPress={onMenu}>
         ← Menu
