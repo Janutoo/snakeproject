@@ -41,24 +41,36 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     buildInitialSnake(boardSize, startLength)
   );
   const [food, setFood] = useState<Position | null>(null);
+  const [bonusFood, setBonusFood] = useState<Position | null>(null);
   const [score, setScore] = useState(0);
   const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [fruitCountdown, setFruitCountdown] = useState<number | null>(null);
+  const [bonusCountdown, setBonusCountdown] = useState<number | null>(null);
 
   const directionRef = useRef<Direction>('RIGHT');
   const nextDirectionRef = useRef<Direction>('RIGHT');
   const snakeRef = useRef<Position[]>(snake);
   const foodRef = useRef<Position | null>(null);
+  const bonusFoodRef = useRef<Position | null>(null);
   const scoreRef = useRef(0);
   const gameOverRef = useRef(false);
+  const pausedRef = useRef(false);
   const fruitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bonusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bonusCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gameLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   snakeRef.current = snake;
   foodRef.current = food;
+  bonusFoodRef.current = bonusFood;
   scoreRef.current = score;
+  pausedRef.current = paused;
+
+  const speed = Math.max(80, 200 - Math.floor(score / 5) * 15);
+  const level = Math.floor(score / 5) + 1;
 
   useEffect(() => {
     getBestScore(playerName).then(setBestScore);
@@ -70,6 +82,8 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     if (gameLoopRef.current) clearInterval(gameLoopRef.current);
     if (fruitTimerRef.current) clearTimeout(fruitTimerRef.current);
     if (countdownRef.current) clearInterval(countdownRef.current);
+    if (bonusTimerRef.current) clearTimeout(bonusTimerRef.current);
+    if (bonusCountdownRef.current) clearInterval(bonusCountdownRef.current);
   }
 
   function spawnFood(currentSnake: Position[]) {
@@ -91,9 +105,7 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     countdownRef.current = setInterval(() => {
       remaining -= 1;
       setFruitCountdown(remaining);
-      if (remaining <= 0) {
-        if (countdownRef.current) clearInterval(countdownRef.current);
-      }
+      if (remaining <= 0 && countdownRef.current) clearInterval(countdownRef.current);
     }, 1000);
 
     fruitTimerRef.current = setTimeout(() => {
@@ -103,32 +115,63 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     }, fruitDelay * 1000);
   }
 
+  function spawnBonusFood(currentSnake: Position[]) {
+    if (bonusTimerRef.current) clearTimeout(bonusTimerRef.current);
+    if (bonusCountdownRef.current) clearInterval(bonusCountdownRef.current);
+    const excluded = [...currentSnake];
+    if (foodRef.current) excluded.push(foodRef.current);
+    const pos = randomPosition(boardSize, excluded);
+    setBonusFood(pos);
+    bonusFoodRef.current = pos;
+
+    let remaining = 6;
+    setBonusCountdown(remaining);
+    bonusCountdownRef.current = setInterval(() => {
+      remaining -= 1;
+      setBonusCountdown(remaining);
+      if (remaining <= 0 && bonusCountdownRef.current) clearInterval(bonusCountdownRef.current);
+    }, 1000);
+
+    bonusTimerRef.current = setTimeout(() => {
+      if (bonusCountdownRef.current) clearInterval(bonusCountdownRef.current);
+      setBonusFood(null);
+      bonusFoodRef.current = null;
+      setBonusCountdown(null);
+    }, 6000);
+  }
+
   useEffect(() => {
-    if (gameOver) return;
-    gameLoopRef.current = setInterval(tick, 150);
+    if (gameOver || paused) return;
+    gameLoopRef.current = setInterval(tick, speed);
     return () => {
       if (gameLoopRef.current) clearInterval(gameLoopRef.current);
     };
-  }, [gameOver]);
+  }, [gameOver, paused, speed]);
 
-  // keyboard controls for web
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     function onKey(e: KeyboardEvent) {
       if (gameOverRef.current) return;
+      if (e.key === ' ') { togglePause(); return; }
+      if (pausedRef.current) return;
       const cur = nextDirectionRef.current;
       if ((e.key === 'ArrowUp' || e.key === 'w') && cur !== 'DOWN') nextDirectionRef.current = 'UP';
       else if ((e.key === 'ArrowDown' || e.key === 's') && cur !== 'UP') nextDirectionRef.current = 'DOWN';
       else if ((e.key === 'ArrowLeft' || e.key === 'a') && cur !== 'RIGHT') nextDirectionRef.current = 'LEFT';
       else if ((e.key === 'ArrowRight' || e.key === 'd') && cur !== 'LEFT') nextDirectionRef.current = 'RIGHT';
-      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const tick = useCallback(() => {
+  function togglePause() {
     if (gameOverRef.current) return;
+    setPaused(p => !p);
+  }
+
+  const tick = useCallback(() => {
+    if (gameOverRef.current || pausedRef.current) return;
 
     directionRef.current = nextDirectionRef.current;
     const dir = directionRef.current;
@@ -144,7 +187,6 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
 
     const newHead: Position = { x: nx, y: ny };
 
-    // collision with wall or self
     if (
       nx < 0 || nx >= boardSize || ny < 0 || ny >= boardSize ||
       prev.some((p) => p.x === newHead.x && p.y === newHead.y)
@@ -164,7 +206,12 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
       foodRef.current.x === newHead.x &&
       foodRef.current.y === newHead.y;
 
+    const ateBonus = bonusFoodRef.current &&
+      bonusFoodRef.current.x === newHead.x &&
+      bonusFoodRef.current.y === newHead.y;
+
     let newSnake: Position[];
+
     if (ate) {
       newSnake = [newHead, ...prev];
       foodRef.current = null;
@@ -173,6 +220,19 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
       scoreRef.current = newScore;
       setScore(newScore);
       startFruitTimer(newSnake);
+      if (!bonusFoodRef.current && Math.random() < 0.4) {
+        spawnBonusFood(newSnake);
+      }
+    } else if (ateBonus) {
+      newSnake = [newHead, ...prev];
+      if (bonusTimerRef.current) clearTimeout(bonusTimerRef.current);
+      if (bonusCountdownRef.current) clearInterval(bonusCountdownRef.current);
+      bonusFoodRef.current = null;
+      setBonusFood(null);
+      setBonusCountdown(null);
+      const newScore = scoreRef.current + 3;
+      scoreRef.current = newScore;
+      setScore(newScore);
     } else {
       newSnake = [newHead, ...prev.slice(0, -1)];
     }
@@ -183,6 +243,7 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
 
   function handlePress(event: GestureResponderEvent) {
     if (gameOverRef.current) return;
+    if (pausedRef.current) { togglePause(); return; }
     const { locationX, locationY } = event.nativeEvent;
     const cx = boardRef.current.width / 2;
     const cy = boardRef.current.height / 2;
@@ -200,7 +261,7 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
   }
 
   function pressDir(dir: Direction) {
-    if (gameOverRef.current) return;
+    if (gameOverRef.current || pausedRef.current) return;
     const cur = nextDirectionRef.current;
     if (dir === 'UP' && cur !== 'DOWN') nextDirectionRef.current = 'UP';
     else if (dir === 'DOWN' && cur !== 'UP') nextDirectionRef.current = 'DOWN';
@@ -228,6 +289,7 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
         </View>
         <View style={styles.titleBox}>
           <Text style={styles.playerName}>{playerName}</Text>
+          <Text style={styles.levelText}>Poziom {level}</Text>
         </View>
         <View style={styles.scoreBox}>
           <Text style={styles.scoreLabel}>REKORD</Text>
@@ -235,14 +297,19 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
         </View>
       </View>
 
-      {/* Fruit countdown */}
+      {/* Info row */}
       <View style={styles.countdownRow}>
-        {food === null && fruitCountdown !== null && (
+        {bonusFood !== null && bonusCountdown !== null && (
+          <Text style={styles.bonusText}>
+            ⭐ Złote jabłko! <Text style={styles.bonusNum}>{bonusCountdown}s</Text>
+          </Text>
+        )}
+        {bonusFood === null && food === null && fruitCountdown !== null && (
           <Text style={styles.countdownText}>
             Następny owocek za: <Text style={styles.countdownNum}>{fruitCountdown}s</Text>
           </Text>
         )}
-        {food !== null && (
+        {bonusFood === null && food !== null && (
           <Text style={styles.countdownText}>🍎 Zjedz owocek!</Text>
         )}
       </View>
@@ -260,7 +327,6 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
             };
           }}
         >
-          {/* Grid lines */}
           {Array.from({ length: boardSize }).map((_, row) =>
             Array.from({ length: boardSize }).map((_, col) => (
               <View
@@ -278,7 +344,6 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
             ))
           )}
 
-          {/* Food */}
           {food && (
             <View
               style={[
@@ -294,7 +359,21 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
             />
           )}
 
-          {/* Snake */}
+          {bonusFood && (
+            <View
+              style={[
+                styles.bonusFoodView,
+                {
+                  left: bonusFood.x * cellSize + 1,
+                  top: bonusFood.y * cellSize + 1,
+                  width: cellSize - 2,
+                  height: cellSize - 2,
+                  borderRadius: (cellSize - 2) / 2,
+                },
+              ]}
+            />
+          )}
+
           {snake.map((seg, i) => (
             <View
               key={`seg-${i}`}
@@ -311,7 +390,13 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
             />
           ))}
 
-          {/* Game Over overlay */}
+          {paused && !gameOver && (
+            <View style={styles.overlay}>
+              <Text style={styles.pauseTitle}>PAUZA</Text>
+              <Text style={styles.pauseHint}>Naciśnij ⏸ aby wznowić</Text>
+            </View>
+          )}
+
           {gameOver && (
             <View style={styles.overlay}>
               <Text style={styles.gameOverTitle}>KONIEC GRY</Text>
@@ -324,35 +409,46 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
         </View>
       </Pressable>
 
-      {/* D-pad controls — mobile only */}
-      {Platform.OS !== 'web' && (
-        <View style={styles.dpad}>
-          <View style={styles.dpadRow}>
-            <Pressable style={styles.dpadBtn} onPress={() => pressDir('UP')}>
-              <Text style={styles.dpadArrow}>▲</Text>
-            </Pressable>
-          </View>
-          <View style={styles.dpadRow}>
-            <Pressable style={styles.dpadBtn} onPress={() => pressDir('LEFT')}>
-              <Text style={styles.dpadArrow}>◀</Text>
-            </Pressable>
-            <View style={styles.dpadCenter} />
-            <Pressable style={styles.dpadBtn} onPress={() => pressDir('RIGHT')}>
-              <Text style={styles.dpadArrow}>▶</Text>
-            </Pressable>
-          </View>
-          <View style={styles.dpadRow}>
-            <Pressable style={styles.dpadBtn} onPress={() => pressDir('DOWN')}>
-              <Text style={styles.dpadArrow}>▼</Text>
-            </Pressable>
-          </View>
-        </View>
+      {/* Pause button web */}
+      {Platform.OS === 'web' && !gameOver && (
+        <Pressable style={styles.pauseBtn} onPress={togglePause}>
+          <Text style={styles.pauseBtnText}>{paused ? '▶ Wznów' : '⏸ Pauza'}</Text>
+        </Pressable>
       )}
 
-      {/* Controls hint */}
+      {/* D-pad + pause mobile */}
+      {Platform.OS !== 'web' && (
+        <>
+          <Pressable style={styles.pauseBtn} onPress={togglePause}>
+            <Text style={styles.pauseBtnText}>{paused ? '▶' : '⏸'}</Text>
+          </Pressable>
+          <View style={styles.dpad}>
+            <View style={styles.dpadRow}>
+              <Pressable style={styles.dpadBtn} onPress={() => pressDir('UP')}>
+                <Text style={styles.dpadArrow}>▲</Text>
+              </Pressable>
+            </View>
+            <View style={styles.dpadRow}>
+              <Pressable style={styles.dpadBtn} onPress={() => pressDir('LEFT')}>
+                <Text style={styles.dpadArrow}>◀</Text>
+              </Pressable>
+              <View style={styles.dpadCenter} />
+              <Pressable style={styles.dpadBtn} onPress={() => pressDir('RIGHT')}>
+                <Text style={styles.dpadArrow}>▶</Text>
+              </Pressable>
+            </View>
+            <View style={styles.dpadRow}>
+              <Pressable style={styles.dpadBtn} onPress={() => pressDir('DOWN')}>
+                <Text style={styles.dpadArrow}>▼</Text>
+              </Pressable>
+            </View>
+          </View>
+        </>
+      )}
+
       <Text style={styles.hint}>
         {Platform.OS === 'web'
-          ? 'Strzałki / WASD lub kliknij planszę w kierunku ruchu'
+          ? 'Strzałki / WASD • Spacja = pauza'
           : 'Użyj strzałek lub tapnij planszę'}
       </Text>
 
@@ -369,6 +465,7 @@ const GRID_LINE = '#21262d';
 const SNAKE_HEAD = '#39d353';
 const SNAKE_BODY = '#26a641';
 const FOOD_COLOR = '#ff6b6b';
+const BONUS_COLOR = '#ffd700';
 const TEXT_COLOR = '#e6edf3';
 const ACCENT = '#58a6ff';
 
@@ -411,6 +508,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
   },
+  levelText: {
+    color: BONUS_COLOR,
+    fontSize: 11,
+    fontWeight: '600',
+  },
   countdownRow: {
     height: 24,
     marginBottom: 8,
@@ -421,6 +523,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   countdownNum: {
+    color: FOOD_COLOR,
+    fontWeight: '700',
+  },
+  bonusText: {
+    color: BONUS_COLOR,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  bonusNum: {
     color: FOOD_COLOR,
     fontWeight: '700',
   },
@@ -449,12 +560,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: FOOD_COLOR,
   },
+  bonusFoodView: {
+    position: 'absolute',
+    backgroundColor: BONUS_COLOR,
+  },
   overlay: {
     ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(13,17,23,0.88)',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
+  },
+  pauseTitle: {
+    color: BONUS_COLOR,
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 3,
+    marginBottom: 8,
+  },
+  pauseHint: {
+    color: TEXT_COLOR,
+    fontSize: 14,
   },
   gameOverTitle: {
     color: FOOD_COLOR,
@@ -477,6 +603,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 10,
     borderRadius: 8,
+  },
+  pauseBtn: {
+    marginTop: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#21262d',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#30363d',
+  },
+  pauseBtnText: {
+    color: ACCENT,
+    fontSize: 14,
+    fontWeight: '700',
   },
   hint: {
     color: '#484f58',
