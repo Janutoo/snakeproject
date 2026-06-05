@@ -199,6 +199,15 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
     }
   }
 
+  function pressDir(dir: Direction) {
+    if (gameOverRef.current) return;
+    const cur = nextDirectionRef.current;
+    if (dir === 'UP' && cur !== 'DOWN') nextDirectionRef.current = 'UP';
+    else if (dir === 'DOWN' && cur !== 'UP') nextDirectionRef.current = 'DOWN';
+    else if (dir === 'LEFT' && cur !== 'RIGHT') nextDirectionRef.current = 'LEFT';
+    else if (dir === 'RIGHT' && cur !== 'LEFT') nextDirectionRef.current = 'RIGHT';
+  }
+
   const boardRef = useRef<{ width: number; height: number; x: number; y: number }>({
     width: 300,
     height: 300,
@@ -315,11 +324,36 @@ export default function GameScreen({ playerName, settings, onGameOver, onMenu }:
         </View>
       </Pressable>
 
+      {/* D-pad controls — mobile only */}
+      {Platform.OS !== 'web' && (
+        <View style={styles.dpad}>
+          <View style={styles.dpadRow}>
+            <Pressable style={styles.dpadBtn} onPress={() => pressDir('UP')}>
+              <Text style={styles.dpadArrow}>▲</Text>
+            </Pressable>
+          </View>
+          <View style={styles.dpadRow}>
+            <Pressable style={styles.dpadBtn} onPress={() => pressDir('LEFT')}>
+              <Text style={styles.dpadArrow}>◀</Text>
+            </Pressable>
+            <View style={styles.dpadCenter} />
+            <Pressable style={styles.dpadBtn} onPress={() => pressDir('RIGHT')}>
+              <Text style={styles.dpadArrow}>▶</Text>
+            </Pressable>
+          </View>
+          <View style={styles.dpadRow}>
+            <Pressable style={styles.dpadBtn} onPress={() => pressDir('DOWN')}>
+              <Text style={styles.dpadArrow}>▼</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
       {/* Controls hint */}
       <Text style={styles.hint}>
         {Platform.OS === 'web'
           ? 'Strzałki / WASD lub kliknij planszę w kierunku ruchu'
-          : 'Tapnij w kierunku, w którym wąż ma się ruszyć'}
+          : 'Użyj strzałek lub tapnij planszę'}
       </Text>
 
       <Text style={styles.menuLink} onPress={onMenu}>
@@ -455,5 +489,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 10,
     padding: 8,
+  },
+  dpad: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  dpadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dpadBtn: {
+    width: 60,
+    height: 60,
+    backgroundColor: '#21262d',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 4,
+    borderWidth: 1,
+    borderColor: '#30363d',
+  },
+  dpadArrow: {
+    color: ACCENT,
+    fontSize: 22,
+  },
+  dpadCenter: {
+    width: 60,
+    height: 60,
+    margin: 4,
   },
 });
